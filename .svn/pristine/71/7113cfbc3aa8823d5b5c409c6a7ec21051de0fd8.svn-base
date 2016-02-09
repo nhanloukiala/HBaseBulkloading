@@ -1,0 +1,121 @@
+/**
+ * 
+ * DIRECTV PROPRIETARY
+ * Copyright© 2014 DIRECTV, INC.
+ * UNPUBLISHED WORK
+ * ALL RIGHTS RESERVED
+ * 
+ * This software is the confidential and proprietary information of
+ * DIRECTV, Inc. ("Proprietary Information").  Any use, reproduction, 
+ * distribution or disclosure of the software or Proprietary Information, 
+ * in whole or in part, must comply with the terms of the license 
+ * agreement, nondisclosure agreement or contract entered into with 
+ * DIRECTV providing access to this software.
+ */
+package com.dtv.ingestion.hbasebulk;
+
+import java.io.IOException;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.FileUtil;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.HColumnDescriptor;
+import org.apache.hadoop.hbase.client.HBaseAdmin;
+import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.mapreduce.LoadIncrementalHFiles;
+import org.apache.hadoop.hbase.util.Bytes;
+
+public class BulkLoadAndSwapTable {
+
+	/**
+	 * 
+	 * main() to only does empty inactive table
+	 * @throws IOException 
+	 */
+	public static void main(String[] args) throws IOException {
+	    
+	    final String lookupTableName = args[0];
+	    final String lookupFamily = args[1];
+	    final String lookupKey = args[2];
+	    final String dataFolder = args[3];
+	    final String errorFolder = args[4];
+	    System.out.println("Drop/re-add inactive table's column family: " + lookupKey + "@" + dataFolder);
+	    
+	    SwapTableSupport swapSupport = new SwapTableSupport(lookupTableName, lookupKey);
+	    Configuration hbaseConf = HBaseConfiguration.create();
+	    try {
+			swapSupport.loadSwapInfo(hbaseConf, lookupFamily);
+		    //finishBulkload(/*new Configuration(), */hbaseConf, swapSupport, null /*empty inactive table only*/, lookupFamily);
+		    finishBulkload(hbaseConf, swapSupport, dataFolder, lookupFamily);
+		} catch (IOException e) {
+			FileSystem.get(hbaseConf).rename(new Path(dataFolder), new Path(errorFolder));
+		} catch (InterruptedException e) {
+			FileSystem.get(hbaseConf).rename(new Path(dataFolder), new Path(errorFolder));
+		}
+	}
+	
+	/**
+	 * Finish the bulkload by:
+	 * 	- Drop inactive table family
+	 * 	- Re-create inactive table family
+	 * 	- Invoke hbase bulkload protocol
+	 * 	- swap inactive/active table names
+	 * 	- Delete immediate output folder
+	 */
+	static void finishBulkload(Configuration hbaseConf, SwapTableSupport swapSupport, 
+			String outputFolderName, String lookupFamily) throws IOException, InterruptedException {
+	    
+	    if (swapSupport.getInactiveTableName() == null || swapSupport.getInactiveFamilyName() == null) {
+	    	throw new RuntimeException("Missing swap config");
+	    }
+	    
+	    //drop/re-create inactive family
+	    HBaseAdmin admin = null;
+	    try {
+	    	admin = new HBaseAdmin(hbaseConf);
+//	    	admin.disableTable(swapSupport.getInactiveTableName());
+//	    	admin.deleteColumn(Bytes.toBytes(swapSupport.getInactiveTableName()), Bytes.toBytes(swapSupport.getInactiveFamilyName()));
+	    	
+	    	//re-create
+//	    	HColumnDescriptor columnDesc = new HColumnDescriptor(Bytes.toBytes(swapSupport.getInactiveFamilyName()));
+//			admin.addColumn(Bytes.toBytes(swapSupport.getInactiveTableName()), columnDesc);
+//			
+//			//re-enable inactive table
+//			admin.enableTable(swapSupport.getInactiveTableName());
+			
+		    //bulk loading
+			if (outputFolderName == null) {
+				return;
+			}
+			FileUtil.chmod(outputFolderName, "+777", true);
+			LoadIncrementalHFiles loadTool;
+			try {
+				loadTool = new LoadIncrementalHFiles(hbaseConf);
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+			
+			System.out.println("OUTPUT FOLDER" + outputFolderName);
+			System.out.println("INACTIVE TABLE NAME" + swapSupport.getInactiveTableName());
+			System.out.println("ACTIVE TABLE NAME" + swapSupport.getActiveTableName());
+
+			
+			HTable hTable = new HTable(hbaseConf, Bytes.toBytes(swapSupport.getActiveTableName()));
+			Path outputPath = new Path(outputFolderName);
+			System.out.println("Starting bulkload...");
+			loadTool.doBulkLoad(outputPath, hTable);
+			System.out.println("Bulkload completed.");
+			
+			//delete stagging folder
+			FileSystem.get(hbaseConf).delete(outputPath, true);
+			System.out.println("Staging data deleted");
+	    } finally {
+	    	if (admin != null) {
+	    		admin.close();
+	    	}
+	    }
+	}
+
+}

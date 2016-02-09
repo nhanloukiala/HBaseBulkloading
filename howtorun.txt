@@ -1,0 +1,21 @@
+1/ Get the source at svn://172.31.59.84/GuideServices/recommendations/recommendations-bulkload
+
+2/ Build jar
+	mvn package
+	
+3/ Prepare input
+hadoop fs -put bulkload/input/sample-input.txt bulkload/input
+
+4/ Create swap lookup table (bulkload_lookup, column family: cf)
+
+5/ Create swap lookup entry: key=lastaction, cf:table_name=bulkload_table2, cf:family_nane=cf, cf:sep_pattern=;, cf:col_name=c1,c2
+
+6/ Create inactive table (name "bulkload_table1", column family "cf")
+
+7/ Run bulkload process
+
+export HADOOP_CLASSPATH=/etc/hbase/conf/:/opt/cloudera/parcels/CDH-4.6.0-1.cdh4.6.0.p0.26/lib/hbase/*
+hadoop jar target/bulkload-0.1-SNAPSHOT.jar com.dtv.ingestion.hbasebulk.HFileGenDriver bulkload_lookup lastaction bulkload/input bulkload/output
+
+Check target table (bulkload_table1) to see the data bulkloaded. Also, in bulkload_lookup table, active table name is updated correspondly.
+
